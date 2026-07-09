@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# --- Seguridad y Producción ---
+# Archivos de firma (Keystores)
+*.jks
+*.keystore
+
+# Archivos de propiedades locales y claves
+*.properties
+android/key.properties
+local.properties
+
+# Google Services (Firebase/AdMob)
+google-services.json
