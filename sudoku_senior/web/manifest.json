@@ -1,11 +1,11 @@
 {
-    "name": "sudoku_senior",
-    "short_name": "sudoku_senior",
+    "name": "Sudoku Zen",
+    "short_name": "Sudoku Zen",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Sudoku Zen — inventusTechStudio",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

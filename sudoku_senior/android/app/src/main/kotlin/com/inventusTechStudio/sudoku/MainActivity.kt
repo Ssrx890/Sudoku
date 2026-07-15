@@ -1,4 +1,4 @@
-package ts.inventus.sudoku
+package com.inventusTechStudio.sudoku
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../managers/game_storage.dart';
+import '../managers/ad_manager.dart';
 import '../managers/audio_manager.dart';
 import '../widgets/zen_background.dart';
 import 'game_screen.dart';
@@ -23,10 +25,36 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _diabolicoUnlocked = false;
   int _maestroWins = 0;
 
+  BannerAd? _bannerAd;
+  bool _isBannerLoaded = false;
+
   @override
   void initState() {
     super.initState();
     _checkState();
+    _loadBanner();
+  }
+
+  void _loadBanner() {
+    final ad = BannerAd(
+      adUnitId: AdManager.bannerId,
+      // Tamaño adaptativo para que ocupe el ancho completo
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          if (mounted) setState(() => _isBannerLoaded = true);
+        },
+        onAdFailedToLoad: (ad, _) => ad.dispose(),
+      ),
+    )..load();
+    _bannerAd = ad;
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    super.dispose();
   }
 
   void _checkState() async {
@@ -43,12 +71,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _startGame(BuildContext context, String mode, int difficulty) {
+  void _startGame(BuildContext context, String mode, int difficulty, {int gridSize = 9}) {
     AudioManager.playClick();
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => GameScreen(mode: mode, difficulty: difficulty),
+        builder: (context) => GameScreen(mode: mode, difficulty: difficulty, gridSize: gridSize),
       ),
     ).then((_) => _checkState());
   }
@@ -318,6 +346,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 8),
                       ],
 
+                      // Modo Aprendiz
+                      _buildApprenticeCard(context, colors),
+                      const SizedBox(height: 8),
+
                       // Cuadrícula de modos 2x1 o 3x1
                       _buildModeRow(context, colors),
 
@@ -335,6 +367,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: _gridDivider(colors),
               ),
+
+              // ── BANNER PUBLICITARIO ────────────────────────────────
+              if (_isBannerLoaded && _bannerAd != null)
+                SizedBox(
+                  width: double.infinity,
+                  height: _bannerAd!.size.height.toDouble(),
+                  child: AdWidget(ad: _bannerAd!),
+                ),
             ],
           ),
         ),
@@ -531,6 +571,53 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   Text(
                     "Colecciona pergaminos y frases de iluminación",
+                    style: TextStyle(fontSize: 10, color: colors.primary.withAlpha(150)),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: colors.primary.withAlpha(120), size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildApprenticeCard(BuildContext context, ColorScheme colors) {
+    return InkWell(
+      onTap: () => _startGame(context, 'aprendiz', 0, gridSize: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: colors.primary.withAlpha(12),
+          border: Border.all(color: colors.primary.withAlpha(50), width: 1.2),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: colors.primary.withAlpha(20),
+                border: Border.all(color: colors.primary.withAlpha(60)),
+              ),
+              child: Icon(Icons.school_outlined, size: 22, color: colors.primary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "MODO APRENDIZ (4×4)",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: colors.primary,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  Text(
+                    "Tablero sencillo de 4 cuadros. Sin presión.",
                     style: TextStyle(fontSize: 10, color: colors.primary.withAlpha(150)),
                   ),
                 ],

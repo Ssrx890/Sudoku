@@ -9,8 +9,9 @@ class GameState {
   final int mistakes;
   final int helpCount;
   final int elapsedTime; // en segundos
-  final String mode; // 'zen' o 'reto'
+  final String mode; // 'zen', 'reto' o 'aprendiz'
   final int difficulty;
+  final int gridSize; // 9 (clásico) ó 4 (Modo Aprendiz)
 
   GameState({
     required this.board,
@@ -22,6 +23,7 @@ class GameState {
     required this.elapsedTime,
     required this.mode,
     required this.difficulty,
+    this.gridSize = 9,
   });
 
   Map<String, dynamic> toJson() => {
@@ -34,6 +36,7 @@ class GameState {
         'elapsedTime': elapsedTime,
         'mode': mode,
         'difficulty': difficulty,
+        'gridSize': gridSize,
       };
 
   factory GameState.fromJson(Map<String, dynamic> json) {
@@ -53,6 +56,7 @@ class GameState {
       elapsedTime: json['elapsedTime'] ?? 0,
       mode: json['mode'] ?? 'reto',
       difficulty: json['difficulty'] ?? 1,
+      gridSize: json['gridSize'] ?? 9,
     );
   }
 }

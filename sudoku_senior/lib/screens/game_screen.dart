@@ -9,6 +9,8 @@ import '../managers/audio_manager.dart';
 import '../data/quotes_data.dart';
 import '../widgets/sudoku_board.dart';
 import '../widgets/numpad.dart';
+import '../widgets/mini_board.dart';
+import '../widgets/mini_numpad.dart';
 import '../widgets/zen_background.dart';
 import 'tutorial_screen.dart';
 
@@ -19,13 +21,15 @@ class GameStateSnapshot {
 }
 
 class GameScreen extends StatefulWidget {
-  final String mode; // 'zen', 'reto', 'continue'
+  final String mode; // 'zen', 'reto', 'continue', 'aprendiz'
   final int difficulty;
+  final int gridSize; // 9 = clásico, 4 = Modo Aprendiz
 
   const GameScreen({
     super.key,
     required this.mode,
     required this.difficulty,
+    this.gridSize = 9,
   });
 
   @override
@@ -45,6 +49,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   int elapsedTime = 0;
   String currentMode = 'reto';
   int currentDifficulty = 1;
+  int currentGridSize = 9; // 9 o 4 (Modo Aprendiz)
 
   List<GameStateSnapshot> undoStack = [];
   Timer? _timer;
@@ -86,6 +91,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     } else {
       currentMode = widget.mode;
       currentDifficulty = widget.difficulty;
+      currentGridSize = widget.gridSize;
       _newGame();
     }
   }
@@ -175,22 +181,29 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         elapsedTime = state.elapsedTime;
         currentMode = state.mode;
         currentDifficulty = state.difficulty;
+        currentGridSize = state.gridSize;
         _isGenerating = false;
       });
       _startTimer();
     } else {
       setState(() => _isGenerating = false);
       currentMode = 'reto';
+      currentGridSize = 9;
       _newGame();
     }
   }
 
   Future<void> _newGame() async {
     setState(() => _isGenerating = true);
-    
+
     // Genera el puzzle en un Isolate secundario para no bloquear la UI
-    final puzzle = await SudokuEngine.generateAsync(currentDifficulty);
-    
+    final GeneratedPuzzle puzzle;
+    if (currentGridSize == 4) {
+      puzzle = await SudokuEngine4x4.generateAsync();
+    } else {
+      puzzle = await SudokuEngine.generateAsync(currentDifficulty);
+    }
+
     if (!mounted) return;
     setState(() {
       solution = puzzle.solution;
@@ -202,6 +215,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       elapsedTime = 0;
       undoStack.clear();
       _isPaused = false;
+      _tenMinuteRewardOffered = false; // Permitir la recompensa de 10 min en la nueva partida
       _isGenerating = false;
     });
     _saveGame();
@@ -243,6 +257,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       elapsedTime: elapsedTime,
       mode: currentMode,
       difficulty: currentDifficulty,
+      gridSize: currentGridSize,
     ));
   }
 
@@ -311,8 +326,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
           _handleMistake();
         }
       } else {
-        // Modo Zen: validamos conflictos contra el tablero actual (fila/columna/caja),
-        // pero SIN contar errores ni castigar. Solo feedback suave.
+        // Zen / Aprendiz: validamos conflictos, feedback suave, sin penalización.
         if (_hasConflict(selectedIndex, num)) {
           AudioManager.playError();
           if (mounted) {
@@ -323,8 +337,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
               ),
             );
           }
-          // No colocamos el número ni corrompemos las notas
-          undoStack.removeLast(); // Revertir el push al undo stack
+          undoStack.removeLast();
         } else {
           _placeNumber(num);
         }
@@ -360,44 +373,36 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   void _cleanNotes(int idx, int num) {
-    int row = idx ~/ 9;
-    int col = idx % 9;
-    for (int i = 0; i < 81; i++) {
-      int r = i ~/ 9;
-      int c = i % 9;
-      if (r == row || c == col || (r ~/ 3 == row ~/ 3 && c ~/ 3 == col ~/ 3)) {
+    final gs = currentGridSize;
+    final box = gs == 4 ? 2 : 3;
+    int row = idx ~/ gs;
+    int col = idx % gs;
+    for (int i = 0; i < gs * gs; i++) {
+      int r = i ~/ gs;
+      int c = i % gs;
+      if (r == row || c == col ||
+          (r ~/ box == row ~/ box && c ~/ box == col ~/ box)) {
         notes[i]?.remove(num);
       }
     }
   }
 
   /// Verifica si colocar [num] en [idx] viola las reglas del tablero actual
-  /// (fila, columna o caja 3x3), ignorando el propio valor de la celda.
+  /// (fila, columna o caja), ignorando el propio valor de la celda.
   bool _hasConflict(int idx, int num) {
-    int row = idx ~/ 9;
-    int col = idx % 9;
-    for (int i = 0; i < 81; i++) {
+    final gs = currentGridSize;
+    final box = gs == 4 ? 2 : 3;
+    int row = idx ~/ gs;
+    int col = idx % gs;
+    for (int i = 0; i < gs * gs; i++) {
       if (i == idx) continue;
       if (board[i] != num) continue;
-      int r = i ~/ 9;
-      int c = i % 9;
-      if (r == row || c == col || (r ~/ 3 == row ~/ 3 && c ~/ 3 == col ~/ 3)) {
+      int r = i ~/ gs;
+      int c = i % gs;
+      if (r == row || c == col ||
+          (r ~/ box == row ~/ box && c ~/ box == col ~/ box)) {
         return true;
       }
-    }
-    return false;
-  }
-
-  /// Devuelve true si colocar [num] en [idx] viola el tablero ACTUAL
-  /// (se usa en _useHelp para evitar poner un número que ya existe en la región)
-  bool _wouldConflict(int idx, int num) {
-    int row = idx ~/ 9, col = idx % 9;
-    for (int i = 0; i < 81; i++) {
-      if (i == idx) continue;
-      if (board[i] != num) continue;
-      int r = i ~/ 9, c = i % 9;
-      if (r == row || c == col ||
-          (r ~/ 3 == row ~/ 3 && c ~/ 3 == col ~/ 3)) return true;
     }
     return false;
   }
@@ -410,15 +415,15 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       if (selectedIndex != -1 &&
           initial[selectedIndex] == 0 &&
           board[selectedIndex] != solution[selectedIndex] &&
-          !_wouldConflict(selectedIndex, solution[selectedIndex])) {
+          !_hasConflict(selectedIndex, solution[selectedIndex])) {
         target = selectedIndex;
       }
 
       // Prioridad 2: cualquier celda vacía cuya solución no crea conflicto
       if (target == -1) {
         List<int> candidates = [];
-        for (int i = 0; i < 81; i++) {
-          if (board[i] == 0 && !_wouldConflict(i, solution[i])) {
+        for (int i = 0; i < currentGridSize * currentGridSize; i++) {
+          if (board[i] == 0 && !_hasConflict(i, solution[i])) {
             candidates.add(i);
           }
         }
@@ -430,10 +435,10 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       // Prioridad 3: celda incorrecta (no vacía) cuya solución no crea conflicto
       if (target == -1) {
         List<int> incorrect = [];
-        for (int i = 0; i < 81; i++) {
+        for (int i = 0; i < currentGridSize * currentGridSize; i++) {
           if (initial[i] == 0 &&
               board[i] != solution[i] &&
-              !_wouldConflict(i, solution[i])) {
+              !_hasConflict(i, solution[i])) {
             incorrect.add(i);
           }
         }
@@ -501,16 +506,16 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkWin() async {
-    if (!board.contains(0)) {
-      bool isWin = true;
-      if (currentMode == 'zen') {
-        for (int i = 0; i < 81; i++) {
-          if (board[i] != solution[i]) {
-            isWin = false;
-            break;
-          }
-        }
+    if (board.contains(0)) return;
+
+    // Validar que todos los valores coincidan con la solución (todos los modos)
+    bool isWin = true;
+    for (int i = 0; i < currentGridSize * currentGridSize; i++) {
+      if (board[i] != solution[i]) {
+        isWin = false;
+        break;
       }
+    }
 
       if (isWin) {
         _timer?.cancel();
@@ -596,13 +601,12 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
           },
         );
       } else {
-        if (currentMode == 'zen' && mounted) {
+        if ((currentMode == 'zen' || currentMode == 'aprendiz') && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("El tablero está lleno pero hay errores.")),
           );
         }
       }
-    }
   }
 
   static const List<String> _motivationalMessages = [
@@ -715,7 +719,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 style: TextStyle(fontSize: 15, color: colors.primary),
               )
             : Text(
-                "Modo Zen",
+                currentMode == 'aprendiz' ? "Modo Aprendiz" : "Modo Zen",
                 style: TextStyle(fontSize: 15, color: colors.primary),
               ),
         // Timer de Reto + contador de Ayudas (derecha)
@@ -770,11 +774,14 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         elevation: 0,
         backgroundColor: Colors.transparent,
       ),
-      bottomNavigationBar: _isBannerLoaded
-          ? SizedBox(
-              height: _bannerAd!.size.height.toDouble(),
-              width: _bannerAd!.size.width.toDouble(),
-              child: AdWidget(ad: _bannerAd!),
+      bottomNavigationBar: _isBannerLoaded && _bannerAd != null
+          ? SafeArea(
+              top: false,
+              child: SizedBox(
+                width: double.infinity,
+                height: _bannerAd!.size.height.toDouble(),
+                child: AdWidget(ad: _bannerAd!),
+              ),
             )
           : null,
       body: _isGenerating
@@ -812,8 +819,9 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 // ── Barra de progreso (arriba del tablero) ──────────────
                 Builder(
                   builder: (context) {
+                    final totalCells = currentGridSize * currentGridSize;
                     final filledCount = board.where((val) => val != 0).length;
-                    final progressPercent = filledCount / 81;
+                    final progressPercent = filledCount / totalCells;
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       decoration: BoxDecoration(
@@ -847,7 +855,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            "$filledCount / 81",
+                            "$filledCount / $totalCells",
                             style: TextStyle(
                               fontSize: 11,
                               color: colors.primary.withAlpha(150),
@@ -863,37 +871,71 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SudokuBoard(
-                        board: board,
-                        initial: initial,
-                        notes: notes,
-                        selectedIndex: selectedIndex,
-                        onCellTap: (index) {
-                          setState(() => selectedIndex = index);
-                        },
-                      ),
+                      if (currentGridSize == 4)
+                        MiniBoard(
+                          board: board,
+                          initial: initial,
+                          notes: notes,
+                          selectedIndex: selectedIndex,
+                          onCellTap: (index) {
+                            setState(() => selectedIndex = index);
+                          },
+                        )
+                      else
+                        SudokuBoard(
+                          board: board,
+                          initial: initial,
+                          notes: notes,
+                          selectedIndex: selectedIndex,
+                          onCellTap: (index) {
+                            setState(() => selectedIndex = index);
+                          },
+                        ),
                       const SizedBox(height: 12),
-                      NumPad(
-                        isPencilMode: isPencilMode,
-                        onTogglePencil: () => setState(() => isPencilMode = !isPencilMode),
-                        onNumberInput: _onInput,
-                        onErase: () {
-                          if (selectedIndex != -1 && initial[selectedIndex] == 0) {
-                            if (board[selectedIndex] != 0 ||
-                                (notes[selectedIndex] != null &&
-                                    notes[selectedIndex]!.isNotEmpty)) {
-                              _pushUndo();
-                              setState(() {
-                                board[selectedIndex] = 0;
-                                notes.remove(selectedIndex);
-                              });
-                              _saveGame();
+                      if (currentGridSize == 4)
+                        MiniNumPad(
+                          isPencilMode: isPencilMode,
+                          onTogglePencil: () => setState(() => isPencilMode = !isPencilMode),
+                          onNumberInput: _onInput,
+                          onErase: () {
+                            if (selectedIndex != -1 && initial[selectedIndex] == 0) {
+                              if (board[selectedIndex] != 0 ||
+                                  (notes[selectedIndex] != null &&
+                                      notes[selectedIndex]!.isNotEmpty)) {
+                                _pushUndo();
+                                setState(() {
+                                  board[selectedIndex] = 0;
+                                  notes.remove(selectedIndex);
+                                });
+                                _saveGame();
+                              }
                             }
-                          }
-                        },
-                        onHelp: _useHelp,
-                        onUndo: _onUndo,
-                      ),
+                          },
+                          onHelp: _useHelp,
+                          onUndo: _onUndo,
+                        )
+                      else
+                        NumPad(
+                          isPencilMode: isPencilMode,
+                          onTogglePencil: () => setState(() => isPencilMode = !isPencilMode),
+                          onNumberInput: _onInput,
+                          onErase: () {
+                            if (selectedIndex != -1 && initial[selectedIndex] == 0) {
+                              if (board[selectedIndex] != 0 ||
+                                  (notes[selectedIndex] != null &&
+                                      notes[selectedIndex]!.isNotEmpty)) {
+                                _pushUndo();
+                                setState(() {
+                                  board[selectedIndex] = 0;
+                                  notes.remove(selectedIndex);
+                                });
+                                _saveGame();
+                              }
+                            }
+                          },
+                          onHelp: _useHelp,
+                          onUndo: _onUndo,
+                        ),
                     ],
                   ),
                 ),

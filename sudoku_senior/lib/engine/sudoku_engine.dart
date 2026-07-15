@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'dart:isolate';
 
-// Datos necesarios para el Isolate (deben ser primitivos o clases simples)
+// ─── Datos para el Isolate 9×9 ───────────────────────────────────────────────
 class _GenerateRequest {
   final int difficulty;
   final SendPort sendPort;
@@ -14,7 +14,6 @@ class GeneratedPuzzle {
   GeneratedPuzzle(this.solution, this.puzzle);
 }
 
-// Función de nivel superior (requerida por Isolate.spawn)
 void _generateInIsolate(_GenerateRequest request) {
   final engine = SudokuEngine();
   engine.generate(request.difficulty);
@@ -24,12 +23,29 @@ void _generateInIsolate(_GenerateRequest request) {
   ));
 }
 
+// ─── Datos para el Isolate 4×4 ───────────────────────────────────────────────
+class _Generate4x4Request {
+  final SendPort sendPort;
+  _Generate4x4Request(this.sendPort);
+}
+
+void _generate4x4InIsolate(_Generate4x4Request request) {
+  final engine = SudokuEngine4x4();
+  engine.generate();
+  request.sendPort.send(GeneratedPuzzle(
+    List.from(engine.solution),
+    List.from(engine.puzzle),
+  ));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MOTOR 9×9
+// ═══════════════════════════════════════════════════════════════════════════════
 class SudokuEngine {
   List<int> solution = List.filled(81, 0);
   List<int> puzzle = List.filled(81, 0);
 
   // --- API PÚBLICA ASÍNCRONA ---
-  // Lanza la generación en un hilo secundario para no bloquear la UI
   static Future<GeneratedPuzzle> generateAsync(int difficulty) async {
     final receivePort = ReceivePort();
     await Isolate.spawn(
@@ -141,15 +157,7 @@ class SudokuEngine {
     return false;
   }
 
-  /// Elimina dígitos garantizando:
-  /// 1. Simetría de 180°: si se borra (r, c), también se intenta borrar (8-r, 8-c)
-  /// 2. Unicidad: cada par borrado es verificado con el solver
-  /// 3. Si la simetría + unicidad impide alcanzar el objetivo (especialmente en
-  ///    niveles altos como Diabólico), se completa con un paso suplementario
-  ///    no-simétrico para garantizar que llegamos al número de agujeros pedido.
   void _removeDigitsSymmetric(int holesToMake) {
-    // Generamos los índices de la mitad del tablero (posiciones 0..40)
-    // El índice 40 es el centro del tablero (celda [4,4])
     List<int> halfCells = List.generate(41, (i) => i);
     halfCells.shuffle();
 
@@ -158,10 +166,9 @@ class SudokuEngine {
     for (int cellId in halfCells) {
       if (holes >= holesToMake) break;
 
-      int mirrorId = 80 - cellId; // Posición opuesta 180°
+      int mirrorId = 80 - cellId;
 
       if (cellId == mirrorId) {
-        // Centro del tablero: no tiene par
         if (puzzle[cellId] == 0) continue;
         int temp = puzzle[cellId];
         puzzle[cellId] = 0;
@@ -171,17 +178,14 @@ class SudokuEngine {
           puzzle[cellId] = temp;
         }
       } else {
-        // Par de celdas simétricas
         if (puzzle[cellId] == 0 || puzzle[mirrorId] == 0) continue;
 
-        // FIX Error 2: no añadir el par si supera el objetivo
         int increment = (holes + 2 <= holesToMake) ? 2 : 1;
 
         int tempA = puzzle[cellId];
         int tempB = puzzle[mirrorId];
 
         if (increment == 2) {
-          // Intentar borrar ambas celdas del par
           puzzle[cellId] = 0;
           puzzle[mirrorId] = 0;
           if (_countSolutions(List.from(puzzle)) == 1) {
@@ -191,13 +195,11 @@ class SudokuEngine {
             puzzle[mirrorId] = tempB;
           }
         } else {
-          // Solo necesitamos 1 más: intentar solo una del par
           puzzle[cellId] = 0;
           if (_countSolutions(List.from(puzzle)) == 1) {
             holes++;
           } else {
             puzzle[cellId] = tempA;
-            // Intentar la otra del par
             puzzle[mirrorId] = 0;
             if (_countSolutions(List.from(puzzle)) == 1) {
               holes++;
@@ -209,8 +211,6 @@ class SudokuEngine {
       }
     }
 
-    // FIX Error 3: si la simetría no alcanzó el objetivo (típico en Diabólico),
-    // rellenar el déficit con una pasada suplementaria no-simétrica.
     if (holes < holesToMake) {
       List<int> remaining = [];
       for (int i = 0; i < 81; i++) {
@@ -253,8 +253,149 @@ class SudokuEngine {
       if (_checkIfSafe(board, row, col, num)) {
         board[row * 9 + col] = num;
         count += _countSolutions(board);
-        if (count > 1) return count; // Early exit: solo importa si es >1
+        if (count > 1) return count;
         board[row * 9 + col] = 0;
+      }
+    }
+    return count;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MOTOR 4×4  —  Modo Aprendiz
+//  Tablero de 16 celdas · dígitos 1-4 · cajas 2×2
+// ═══════════════════════════════════════════════════════════════════════════════
+class SudokuEngine4x4 {
+  static const int _size = 4;   // Dimensión del tablero
+  static const int _box  = 2;   // Tamaño de cada caja
+
+  List<int> solution = List.filled(_size * _size, 0);
+  List<int> puzzle   = List.filled(_size * _size, 0);
+
+  // --- API PÚBLICA ASÍNCRONA ---
+  static Future<GeneratedPuzzle> generateAsync() async {
+    final receivePort = ReceivePort();
+    await Isolate.spawn(
+      _generate4x4InIsolate,
+      _Generate4x4Request(receivePort.sendPort),
+    );
+    final result = await receivePort.first as GeneratedPuzzle;
+    receivePort.close();
+    return result;
+  }
+
+  void generate() {
+    // Rellenar tablero completo con backtracking
+    solution = List.filled(_size * _size, 0);
+    _fillBoard(0);
+
+    // Crear puzzle quitando ~8 celdas (dejando ~8 pistas visibles)
+    puzzle = List.from(solution);
+    _removeDigits(8);
+  }
+
+  /// Backtracking aleatorio para rellenar el tablero 4×4
+  bool _fillBoard(int pos) {
+    if (pos == _size * _size) return true;
+
+    int row = pos ~/ _size;
+    int col = pos % _size;
+
+    List<int> nums = [1, 2, 3, 4]..shuffle();
+    for (int num in nums) {
+      if (_isSafe(solution, row, col, num)) {
+        solution[pos] = num;
+        if (_fillBoard(pos + 1)) return true;
+        solution[pos] = 0;
+      }
+    }
+    return false;
+  }
+
+  bool _isSafe(List<int> board, int row, int col, int num) {
+    // Fila
+    for (int c = 0; c < _size; c++) {
+      if (board[row * _size + c] == num) return false;
+    }
+    // Columna
+    for (int r = 0; r < _size; r++) {
+      if (board[r * _size + col] == num) return false;
+    }
+    // Caja 2×2
+    int boxRow = (row ~/ _box) * _box;
+    int boxCol = (col ~/ _box) * _box;
+    for (int r = 0; r < _box; r++) {
+      for (int c = 0; c < _box; c++) {
+        if (board[(boxRow + r) * _size + (boxCol + c)] == num) return false;
+      }
+    }
+    return true;
+  }
+
+  void _removeDigits(int holes) {
+    // Intentar quitar celdas pares simétricas primero
+    List<int> cells = List.generate(_size * _size, (i) => i)..shuffle();
+    int removed = 0;
+
+    for (int cellId in cells) {
+      if (removed >= holes) break;
+      if (puzzle[cellId] == 0) continue;
+
+      int mirrorId = (_size * _size - 1) - cellId;
+
+      if (cellId == mirrorId) {
+        int temp = puzzle[cellId];
+        puzzle[cellId] = 0;
+        if (_countSolutions(List.from(puzzle)) == 1) {
+          removed++;
+        } else {
+          puzzle[cellId] = temp;
+        }
+      } else if (puzzle[mirrorId] != 0 && removed + 2 <= holes) {
+        int tempA = puzzle[cellId];
+        int tempB = puzzle[mirrorId];
+        puzzle[cellId] = 0;
+        puzzle[mirrorId] = 0;
+        if (_countSolutions(List.from(puzzle)) == 1) {
+          removed += 2;
+        } else {
+          puzzle[cellId] = tempA;
+          puzzle[mirrorId] = tempB;
+          // Intentar solo una
+          puzzle[cellId] = 0;
+          if (_countSolutions(List.from(puzzle)) == 1) {
+            removed++;
+          } else {
+            puzzle[cellId] = tempA;
+          }
+        }
+      } else {
+        int temp = puzzle[cellId];
+        puzzle[cellId] = 0;
+        if (_countSolutions(List.from(puzzle)) == 1) {
+          removed++;
+        } else {
+          puzzle[cellId] = temp;
+        }
+      }
+    }
+  }
+
+  int _countSolutions(List<int> board) {
+    // Buscar primera celda vacía
+    int pos = board.indexOf(0);
+    if (pos == -1) return 1; // Tablero completo
+
+    int row = pos ~/ _size;
+    int col = pos % _size;
+    int count = 0;
+
+    for (int num = 1; num <= _size; num++) {
+      if (_isSafe(board, row, col, num)) {
+        board[pos] = num;
+        count += _countSolutions(board);
+        if (count > 1) return count; // Early exit
+        board[pos] = 0;
       }
     }
     return count;

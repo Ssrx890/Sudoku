@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sudoku_senior/main.dart';
+import 'package:sudoku_zen/main.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -49,8 +49,12 @@ void main() {
 
     // Build our app and trigger a frame.
     await tester.pumpWidget(const SudokuApp());
-    await tester.pump();
-
+    // Pump frames to let async initialization complete
+    for (int i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+    
     // Verify that the title is present (using textContaining to be safe)
     expect(find.textContaining('S U D O K U'), findsOneWidget);
   });
